@@ -1,0 +1,141 @@
+---
+title: "A Prediction Algorithm For Correctness of Weight Lifting"
+author: "Bruce Johnston"
+date: "June 10, 2017"
+output: html_document
+---
+
+## Introduction And Approach
+I will assume that the reader is familiar with the assignment and datasets used in this assignment, so I will not explain them. What I want to do here is to simply explain how I went about building my prediction model. \par \smallskip
+
+From a brief glance at the data, it is clear that we have a great abundance of data and many potential predictors. The experience of many people [1] suggests that the vast majority of the predictors in this dataset will be irrelevant, or nearly so, in terms of overall prediction effectiveness. Thus the first thing I did after cleaning the data was to use a decision tree analysis to determine variable importance. I then experimented with several models that were inexpensive, computationally speaking, to see how the inclusion or exclusion of these variables affected prediction accuracy on a validation set of $1/5 = 20\%$ of the cleaned data. \par \smallskip
+
+
+##Data Preparation and Necessary Files
+There are quite a few files we have to load:
+```{r, echo=TRUE}
+library(lubridate)
+library(dplyr)
+library(gbm)
+library(randomForest)
+library(caret)
+library(caretEnsemble)
+library(rpart)
+library(fastAdaboost)
+library(MASS)
+```
+
+
+We include the procedures I went through to clean and prepare the data for completeness' sake. 
+```{r, echo=TRUE}
+TrainingFile <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+
+TestingFile <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+TrainingData <- download.file(TrainingFile,"PMLtrain.csv")
+
+TestingData <- download.file(TestingFile, "PMLtest.csv")
+
+Train <- read.csv("PMLtrain.csv", header = TRUE)
+
+Test <- read.csv("PMLtest.csv", header = TRUE)
+
+rm(TrainingFile, TestingFile, TrainingData, TestingData)
+##Clean data - User name is irrelevant to this problem, as are several other variables that only refer to 
+##administrative data. Also,
+##a large proportion of blank entries and NAs need to be removed before we can apply the 
+##caret ensemble tools.
+
+Test <- Test[,8:160]
+Train <- Train[,8:160]
+
+##This function, with the code below it, cleans out rows with large proportions of NAs or blank data points
+
+Fraction <- function(x){
+  num <- sum(x == "" | is.na(x))
+  denom <- length(x)
+  frac <- num/denom
+  return(frac)
+}
+
+f <- 0
+HighBlankNames <- c()
+for (k in 1:ncol(Train)){
+  f <- Fraction(Train[,k])
+  if (f > 0.25){HighBlankNames <- c(HighBlankNames, k)}
+  else HighBlankNames <- HighBlankNames
+}
+
+Train <- Train[, -HighBlankNames]
+Test <- Test[, -HighBlankNames]
+
+rm(k, f, HighBlankNames)
+##Finally, get rid of remaining cases with NAs. Caret functions cannot handle these.
+Train <- na.omit(Train)
+Test <- na.omit(Test)
+
+##We are now going to split the training data into training and validation portions. 
+set.seed(3411)
+inTrain <- createDataPartition(y=Train$classe, p = 0.8, list = FALSE)
+TrainingFinal <- Train[inTrain,]
+Validation <- Train[-inTrain,]
+
+X_Train <- TrainingFinal[, 1:ncol(TrainingFinal) - 1]
+Y_Train <- TrainingFinal[, ncol(TrainingFinal)]
+
+X_Test <- Validation[, 1:ncol(Validation) - 1]
+Y_Test <- Validation[,ncol(Validation)]
+
+rm(inTrain)
+
+```
+
+
+
+##Variable Importance Determination
+
+We use random partitions (decision trees) to get a handle on the relative importance of various components of the predictors.
+
+```{r}
+TreeFit <- rpart(formula = classe~., data=TrainingFinal, method = "class", control = rpart.control(minsplit = 50, cp = 0.001))
+
+summary(TreeFit$variable.importance)
+
+sqrt(var(TreeFit$variable.importance))
+```
+##Model Building and Cross Validation
+
+On the basic intuition that predictors with importance one-half or more standard deviations from the mean importance are the most likely to contribute to the model's effectiveness, I examined the predictors fitting that criterion and from them built formulas of the form classe ~ var1 + var2 + ... that I attempted to test for quality as measured by accuracy on the validation set. Of course I did not test them as regression formulas - I just used training data of the form Train[subset of columns] to train the models. The goal here was to get the most "bang for your buck" in terms of a predictor/accuracy ratio. I tried to fit three basic families of models: a random forest model, an LDA model, and an AdaBoost model.\par \smallskip
+
+What I quickly discovered was that essentially all families of models that I attempted to test, even using only a few predictors, were too computationally intensive for my computer to run properly in any reasonable amount of time! I had no idea how to get around this problem, but it suggests that perhaps I should have used smaller cross sections of the data. I had hoped that predictor restriction and picking would make it unnecessary. I look forward to seeing what other students did. I tried boost models, svm models, amdai models, the works, to find an alternative to the (relatively inffective) LDA model, but to no avail. I was left with the LDA model by default, which had an accuracy of about 0.69 on the validation set of data. This is the model that I will be using on the test sets. I predict that this will be roughly the accuracy the model enjoys on the test sets as well (i.e. the out-of-sample error rate will be near 0.31). The code for generating this model is below. \par \smallskip
+
+I personally suspect that had I possessed the computational resources to do it, a random forest approach would have worked well here. But I will never know. This is, to my mind, a profoundly incomplete analysis, but it is what I can do in the amount of time provided. I hope that my graders will understand.
+
+```{r, echo=TRUE}
+#This function, which computes prediction accuracy for our types of datasets, will be useful later.
+ACC <- function(x){
+  F <- sum(x == Y_Test)/length(Y_Test)
+  return(F)
+}
+
+
+LDAModel <- train(y = Y_Train, x = X_Train, method="lda")
+
+LDApred <- predict(LDAModel, newdata = X_Test)
+
+##Cross Validation
+
+ACC(LDApred)
+
+
+
+
+
+
+```
+##References
+
+[1] Hastie, T., Tibshirani, R. and Friedman, J. "The Elements of Statistical Learning". Springer-Verlag, New York, NY (2001).
+
+
+
